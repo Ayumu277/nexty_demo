@@ -100,7 +100,7 @@ if uploaded_file is not None:
     col1, col2 = st.columns([1, 1])
     with col1:
         st.subheader("アップロードした画像")
-        st.image(uploaded_file, caption="データフローダイアグラム", use_column_width=True)
+        st.image(uploaded_file, caption="データフローダイアグラム", use_container_width=True)
 
     # Session Stateに画像を保存
     if 'uploaded_image' not in st.session_state:
