@@ -1,5 +1,5 @@
-streamlit==1.32.2
-openai==1.99.3
-python-dotenv==1.0.1
-Pillow==10.3.0
-jiter>=0.4.0
+streamlit
+openai
+python-dotenv
+Pillow
+numpy
