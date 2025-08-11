@@ -1,6 +1,7 @@
 import streamlit as st
 from dotenv import load_dotenv
 from utils.llm_analyzer import LLMAnalyzer
+import html
 
 # 追加
 import json
@@ -66,6 +67,51 @@ st.set_page_config(
     layout="wide"
 )
 
+# 全体の背景色とスタイルを白ベースに変更
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #FFFFFF;
+    }
+    .main .block-container {
+        background-color: #FFFFFF;
+        padding-top: 2rem;
+    }
+    /* ヘッダとサイドバーを自然な白基調に */
+    [data-testid="stHeader"] {
+        background-color: #FFFFFF !important;
+        border-bottom: 1px solid #E6E6E6;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #F7F7F7 !important;
+        color: #000000;
+    }
+    .stTextArea > div > div > textarea {
+        background-color: #F5F5F5;
+        color: #000000;
+        border: 1px solid #CCCCCC;
+    }
+    .stMarkdown {
+        color: #000000;
+    }
+    h1, h2, h3 {
+        color: #000000;
+    }
+    .stButton > button {
+        background-color: #F0F0F0;
+        color: #000000;
+        border: 1px solid #CCCCCC;
+    }
+    .stInfo {
+        background-color: #F8F9FA;
+        color: #000000;
+    }
+    p, div, span {
+        color: #000000;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # タイトルと説明
 st.title("Simulink要約生成ツール")
 st.markdown(
@@ -119,11 +165,16 @@ with left_col:
 with right_col:
     st.subheader("概要文章")
     if 'summary_text' in st.session_state and st.session_state['summary_text']:
-        try:
-            with st.container(height=520):
-                st.markdown(st.session_state['summary_text'])
-        except TypeError:
-            st.markdown(st.session_state['summary_text'])
+        # 枠付きのシンプルな表示（余計なUIなし）
+        safe_html = html.escape(st.session_state['summary_text'])
+        st.markdown(
+            f"""
+            <div style="border:1px solid #E0E0E0; border-radius:8px; padding:16px; height:520px; overflow-y:auto; background:#FFFFFF;">
+              <pre style="white-space:pre-wrap; word-wrap:break-word; margin:0; font-family:inherit; color:#000;">{safe_html}</pre>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         copy_button(
             text=st.session_state['summary_text'],

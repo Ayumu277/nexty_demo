@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from openai import OpenAI
 from typing import Dict, Any, Union
 
@@ -130,23 +131,34 @@ JSONスキーマ:
             input_descriptor = "SimulinkのMDLテキスト/構造テキスト"
 
         instructions = r"""
-# Simulink/DFD 図の要約生成（日本語・箇条書きのみ）
+# Simulink/DFD 図の要約生成（指定フォーマット厳守）
 
-あなたはシステムブロック図/DFD/Simulinkの要約ライターです。
-与えられた入力だけを根拠に、システムの流れと構造を要約してください。
-中間推論は出力せず、内部で行ってください。
+あなたはシステム解説書の技術ライターです。以下のテンプレートに“完全一致”させて、
+与えられた内容をもとに簡潔な概要を作成してください。句読点・改行・ circled 数字の体裁を厳守します。
 
-出力ガイドライン:
-- 日本語の箇条書き 3〜5 行、各行 1 文、50〜120 字目安
-- 1行目: 目的と全体像 / 2行目: 入力→初期処理 / 3行目: ストア/中間結果 / 4行目: 統合・終盤処理 / 5行目(任意): 出力・特徴
-- ラベル名は原文のまま。不明は「名称不明」。入力にない内容は推測しない。
+テンプレート:
+概要
+以下に本システムの概要を示す。
+① モデル化対象
+<1,2行で記述>
 
-厳守する出力形式:
-- 箇条書きの Markdown のみ（先頭見出しや前置きは付けない）
+② モデル化の範囲・抽象度
+<1,2行で記述>
+
+③ モデル化した機能
+<機能1を1,2行で>
+<機能2を1,2行で>
+<機能3（任意）を1,2行で>
+
+制約:
+- 箇条書き(ハイフン・番号)やMarkdown見出し(#)は使わない。
+- 不明は「名称不明」。入力に無い内容は推測しない。
+- 名詞止めを基本とし、冗長な修飾は避ける。
+- 各見出し直後に必ず改行を入れる（例: 「① モデル化対象\n<内容>」）。見出しと内容を同じ行に書かない。
         """.strip()
 
         model_input = (
-            f"次の{input_descriptor}を要約してください。箇条書きのみで出力:\n\n" + user_payload
+            f"次の{input_descriptor}の内容に基づき、テンプレートを満たす要約を作成してください。\n\n" + user_payload
         )
 
         try:
@@ -155,7 +167,7 @@ JSONスキーマ:
                 instructions=instructions,
                 input=model_input,
             )
-            return resp.output_text
+            return self._format_to_overview_template(resp.output_text)
 
         except AttributeError:
             print("responses.create APIが利用できないため、chat.completions.createを使用します")
@@ -166,10 +178,26 @@ JSONスキーマ:
     def _generate_summary_fallback(self, source: Union[str, Dict[str, Any]]) -> str:
         """Chat Completions でのフォールバック（テキスト/JSON → Markdown箇条書き概要）"""
         instructions = r"""
-# Simulink/DFD 図の要約生成（日本語・箇条書きのみ）
-- 出力は箇条書き 3〜5 行、各行 1 文、50〜120 字目安。
-- 見出しや前置きは付けない。Markdown の箇条書きのみ。
-- ラベルは原文どおり。不明は「名称不明」。推測しない。
+# Simulink/DFD 図の要約生成（指定フォーマット厳守）
+以下のテンプレート通りに出力。余計な文字・記号・見出し・前置きを付けない。
+
+テンプレート:
+概要
+以下に本システムの概要を示す。
+① モデル化対象
+<1,2行で記述>
+
+② モデル化の範囲・抽象度
+<1,2行で記述>
+
+③ モデル化した機能
+<機能1を1,2行で>
+<機能2を1,2行で>
+<機能3（任意）を1,2行で>
+
+ルール:
+- circled 数字 ①/②/③ を必ず使う。見出し語は正確に記載。
+- 不明は「名称不明」。入力に無い内容は推測しない。
         """.strip()
 
         if isinstance(source, dict):
@@ -180,7 +208,7 @@ JSONスキーマ:
             descriptor = "MDL/構造テキスト"
 
         user = (
-            f"次の{descriptor}を要約してください（箇条書きのみ）。\n\n" + payload
+            f"次の{descriptor}の内容に基づき、上記テンプレートの形式で要約を作成してください。\n\n" + payload
         )
 
         resp = self.client.chat.completions.create(
@@ -192,7 +220,109 @@ JSONスキーマ:
             max_tokens=800,
             temperature=0.2,
         )
-        return resp.choices[0].message.content
+        return self._format_to_overview_template(resp.choices[0].message.content)
+
+    # ========= 4) 出力フォーマットの最終整形 =========
+    def _format_to_overview_template(self, text: str) -> str:
+        """
+        指定された改行パターンに完全一致させて整形:
+        概要[改行]
+        以下に本システムの概要を示す。[改行]
+        [改行]
+        ① モデル化対象[改行]
+        内容行[改行]
+        [改行]
+        ② モデル化の範囲・抽象度[改行]
+        内容行[改行]
+        [改行]
+        ③ モデル化した機能[改行]
+        内容行[改行]
+        """
+        if not text:
+            return text
+
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+        # 全体を再構築
+        result_lines = []
+
+                # 先頭部分を固定フォーマットで追加
+        result_lines.append("概要")
+        result_lines.append("以下に本システムの概要を示す。")
+        result_lines.append("")  # 空行
+
+        # ①②③セクションを順次処理
+        sections = re.split(r"(①\s*モデル化対象|②\s*モデル化の範囲・抽象度|③\s*モデル化した機能)", normalized)
+
+        current_section = None
+        for i, section in enumerate(sections):
+            section = section.strip()
+            if not section:
+                continue
+
+            # 見出し判定
+            if "① モデル化対象" in section:
+                current_section = "① モデル化対象"
+                # 見出しとその内容を一度に処理
+                result_lines.append(current_section)
+                # 次のセクション（内容）を取得
+                if i + 1 < len(sections):
+                    content = sections[i + 1].strip()
+                    if content:
+                        # 内容を整形
+                        content_lines = []
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            if line:
+                                line = re.sub(r"^[\-•\d\.\s]+", "", line)
+                                if line:
+                                    content_lines.append(line)
+                        if content_lines:
+                            combined_content = ' '.join(content_lines)
+                            result_lines.append(combined_content)
+                result_lines.append("")  # セクション後の空行
+
+            elif "② モデル化の範囲・抽象度" in section:
+                current_section = "② モデル化の範囲・抽象度"
+                result_lines.append(current_section)
+                # 次のセクション（内容）を取得
+                if i + 1 < len(sections):
+                    content = sections[i + 1].strip()
+                    if content:
+                        # 内容を整形
+                        content_lines = []
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            if line:
+                                line = re.sub(r"^[\-•\d\.\s]+", "", line)
+                                if line:
+                                    content_lines.append(line)
+                        if content_lines:
+                            combined_content = ' '.join(content_lines)
+                            result_lines.append(combined_content)
+                result_lines.append("")  # セクション後の空行
+
+            elif "③ モデル化した機能" in section:
+                current_section = "③ モデル化した機能"
+                result_lines.append(current_section)
+                # 次のセクション（内容）を取得
+                if i + 1 < len(sections):
+                    content = sections[i + 1].strip()
+                    if content:
+                        # 内容を整形
+                        content_lines = []
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            if line:
+                                line = re.sub(r"^[\-•\d\.\s]+", "", line)
+                                if line:
+                                    content_lines.append(line)
+                        if content_lines:
+                            combined_content = ' '.join(content_lines)
+                            result_lines.append(combined_content)
+
+        final_result = '\n'.join(result_lines)
+        return final_result
 
     # ========= 3) 解析結果の妥当性チェック =========
     def validate_analysis(self, analysis_result: Dict[str, Any]) -> bool:
