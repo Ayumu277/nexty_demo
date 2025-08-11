@@ -86,44 +86,49 @@ with st.sidebar:
         """
     )
 
-st.header("入力テキスト")
+# 2カラムレイアウト
+left_col, right_col = st.columns([1, 1])
 
-input_text = st.text_area(
-    label="",
-    value=st.session_state.get("input_text", ""),
-    height=300,
-    key="input_text",
-    placeholder=(
-        "SimulinkのMDLテキスト、またはブロック/接続の構造テキストを貼り付けてください。\n"
-        "例) Block/Line定義や、{processes:[...], data_flows:[...]} のような抽出済みJSON/テキストなど"
-    ),
-    label_visibility="collapsed",
-)
-
-if st.button("📝 要約生成", type="primary", use_container_width=True):
-    if not input_text or not input_text.strip():
-        st.warning("入力テキストを貼り付けてください。")
-    else:
-        with st.spinner("要約を生成中..."):
-            try:
-                llm_analyzer = LLMAnalyzer()
-                summary_text = llm_analyzer.generate_summary(input_text)
-                st.session_state['summary_text'] = summary_text
-                st.success("✅ 要約を生成しました！")
-            except Exception as e:
-                st.error(f"エラーが発生しました: {str(e)}")
-                st.stop()
-
-# 出力: 日本語の要約（Markdownのみ）
-st.header("概要文章")
-if 'summary_text' in st.session_state and st.session_state['summary_text']:
-    try:
-        st.markdown(st.session_state['summary_text'])
-    except TypeError:
-        st.markdown(st.session_state['summary_text'])
-
-    copy_button(
-        text=st.session_state['summary_text'],
-        label="📋 概要をコピー",
-        key="copy-summary"
+with left_col:
+    st.subheader("Simulink MDL形式")
+    input_text = st.text_area(
+        label="",
+        value=st.session_state.get("input_text", ""),
+        height=520,
+        key="input_text",
+        placeholder=(
+            "SimulinkのMDLテキスト、またはブロック/接続の構造テキストを貼り付けてください。\n"
+            "例) Block/Line定義や、{processes:[...], data_flows:[...]} のような抽出済みJSON/テキストなど"
+        ),
+        label_visibility="collapsed",
     )
+    if st.button("📝 要約生成", type="primary", use_container_width=True, key="run-summary"):
+        if not input_text or not input_text.strip():
+            st.warning("入力テキストを貼り付けてください。")
+        else:
+            with st.spinner("要約を生成中..."):
+                try:
+                    llm_analyzer = LLMAnalyzer()
+                    summary_text = llm_analyzer.generate_summary(input_text)
+                    st.session_state['summary_text'] = summary_text
+                    st.success("✅ 要約を生成しました！")
+                except Exception as e:
+                    st.error(f"エラーが発生しました: {str(e)}")
+                    st.stop()
+
+with right_col:
+    st.subheader("概要文章")
+    if 'summary_text' in st.session_state and st.session_state['summary_text']:
+        try:
+            with st.container(height=520):
+                st.markdown(st.session_state['summary_text'])
+        except TypeError:
+            st.markdown(st.session_state['summary_text'])
+
+        copy_button(
+            text=st.session_state['summary_text'],
+            label="📋 概要をコピー",
+            key="copy-summary"
+        )
+    else:
+        st.info("左のMDL/構造テキストを貼り付けて『要約生成』を押してください。")
