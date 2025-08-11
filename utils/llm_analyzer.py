@@ -1,7 +1,7 @@
 import os
 import json
 from openai import OpenAI
-from typing import Dict, Any
+from typing import Dict, Any, Union
 
 
 class LLMAnalyzer:
@@ -116,87 +116,71 @@ JSONスキーマ:
         return json.loads(resp.choices[0].message.content)
 
     # ========= 2) 構造JSON→Markdown箇条書き概要 =========
-    def generate_summary(self, analysis_result: Dict[str, Any]) -> str:
+    def generate_summary(self, source: Union[str, Dict[str, Any]]) -> str:
         """
-        解析JSONをもとに、画像見本のような「箇条書きの概要文章（Markdown）」を生成。
-        出力は **以下フォーマットのみ**：
-        ### 概要文章
-        - ...
-        - ...
-        - ...
-        - ...
-        - ...
+        入力（SimulinkのMDLテキスト、構造テキスト、または既存の解析JSON）をもとに、
+        日本語の箇条書き概要（Markdownのみ、見出しなし）を生成する。
         """
-        # Markdownプロンプト（指示はinstructionsへ、データはinputへ渡す）
+        # 入力の種別に応じて説明テキストを作る
+        if isinstance(source, dict):
+            user_payload = json.dumps(source, ensure_ascii=False)
+            input_descriptor = "解析JSON（要素・接続の構造）"
+        else:
+            user_payload = str(source)
+            input_descriptor = "SimulinkのMDLテキスト/構造テキスト"
+
         instructions = r"""
-# 画像→Simulink/DFD 図の**概要文章** 生成プロンプト
+# Simulink/DFD 図の要約生成（日本語・箇条書きのみ）
 
-あなたは**システムブロック図/DFD/Simulink 図の要約ライター**です。
-与えられた解析JSON（要素と接続）だけを根拠に、図の構造を要約します。
-**中間の推論や根拠は出力しない**でください（内部でのみ実施）。
+あなたはシステムブロック図/DFD/Simulinkの要約ライターです。
+与えられた入力だけを根拠に、システムの流れと構造を要約してください。
+中間推論は出力せず、内部で行ってください。
 
-## 出力ガイドライン
-- 出力は**日本語の箇条書き（最大5行）**、各行**1文**、**50〜120字**を目安。
-- **1行目**: 図の目的と全体像（何を、どの経路で処理するシステムか）。
-- **2行目**: 入力から初期処理/分岐（並列の有無）。
-- **3行目**: データ保存（データストア）/中間結果の扱い。
-- **4行目**: 合流・統合処理や終盤処理の役割。
-- **5行目(任意)**: 出力の集約・成果物、構造的特徴（並列/効率/冗長性など）。
-- 図中のラベル（例: 処理1、データストア2）は**原文どおり**に用いる。
-- 不明は**「名称不明」**と記載。画像に無い内容は**推測しない**。
+出力ガイドライン:
+- 日本語の箇条書き 3〜5 行、各行 1 文、50〜120 字目安
+- 1行目: 目的と全体像 / 2行目: 入力→初期処理 / 3行目: ストア/中間結果 / 4行目: 統合・終盤処理 / 5行目(任意): 出力・特徴
+- ラベル名は原文のまま。不明は「名称不明」。入力にない内容は推測しない。
 
-## 出力フォーマット（厳守）
-以下のMarkdownのみを出力すること。前置き/後置き/見出し以外の余計な文章を禁止。
-
-- （1行目：全体像）
-- （2行目：入力→初期処理/分岐）
-- （3行目：ストア保存/供給）
-- （4行目：統合処理/終盤処理）
-- （5行目：出力の集約・特徴）
+厳守する出力形式:
+- 箇条書きの Markdown のみ（先頭見出しや前置きは付けない）
         """.strip()
 
-        input_text = (
-            "次の解析JSONを基に、上記ガイドライン/フォーマットに厳密に従って出力してください。\n\n"
-            + json.dumps(analysis_result, ensure_ascii=False)
+        model_input = (
+            f"次の{input_descriptor}を要約してください。箇条書きのみで出力:\n\n" + user_payload
         )
 
         try:
             resp = self.client.responses.create(
                 model=self.model,
                 instructions=instructions,
-                input=input_text,
+                input=model_input,
             )
             return resp.output_text
 
         except AttributeError:
             print("responses.create APIが利用できないため、chat.completions.createを使用します")
-            return self._generate_summary_fallback(analysis_result)
+            return self._generate_summary_fallback(source)
         except Exception as e:
             raise Exception(f"概要文章生成中にエラーが発生しました: {str(e)}")
 
-    def _generate_summary_fallback(self, analysis_result: Dict[str, Any]) -> str:
-        """Chat Completions でのフォールバック（JSON→Markdown箇条書き概要）"""
+    def _generate_summary_fallback(self, source: Union[str, Dict[str, Any]]) -> str:
+        """Chat Completions でのフォールバック（テキスト/JSON → Markdown箇条書き概要）"""
         instructions = r"""
-# 画像→Simulink/DFD 図の**概要文章** 生成プロンプト
-（システムは日本語で出力。下記フォーマット以外を出さない）
-
-### 出力ガイドライン
-- 箇条書き最大5行、各行1文、50〜120字目安。
-- 1行目: 全体像 / 2行目: 入力→初期処理 / 3行目: ストア / 4行目: 統合 / 5行目: 出力の特徴（任意）
+# Simulink/DFD 図の要約生成（日本語・箇条書きのみ）
+- 出力は箇条書き 3〜5 行、各行 1 文、50〜120 字目安。
+- 見出しや前置きは付けない。Markdown の箇条書きのみ。
 - ラベルは原文どおり。不明は「名称不明」。推測しない。
-
-### 出力フォーマット（厳守）
-### 概要文章
-- （1行目：全体像）
-- （2行目：入力→初期処理/分岐）
-- （3行目：ストア保存/供給）
-- （4行目：統合処理/終盤処理）
-- （5行目：出力の集約・特徴）
         """.strip()
 
+        if isinstance(source, dict):
+            payload = json.dumps(source, ensure_ascii=False)
+            descriptor = "解析JSON"
+        else:
+            payload = str(source)
+            descriptor = "MDL/構造テキスト"
+
         user = (
-            "次の解析JSONを基に、上記フォーマットでMarkdownのみを出力してください。\n\n"
-            + json.dumps(analysis_result, ensure_ascii=False)
+            f"次の{descriptor}を要約してください（箇条書きのみ）。\n\n" + payload
         )
 
         resp = self.client.chat.completions.create(
